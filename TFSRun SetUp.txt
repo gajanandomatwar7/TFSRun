@@ -1,0 +1,214 @@
+TFSRun Basic SetUp:
+Archtecture:-
+    1. In Private Network
+    2. In Public Internet
+
+1. Private Network:
+
+Basic requirement:
+    a. Nodes(servers or machines i.e CPU's)
+    b. Router(for private Network)
+    c. Switch(for device connection)
+
+2. Public Internet:
+
+Basic requirement:
+    a. Cloud Server(like EC2)
+    b. Domain name(not subdomain but main domain and its access)
+    c. Tunneling tools knowledge
+
+For public interent level access, we do have two approaches of using tunneling concept:
+    1. using tunneling provider like ngroq, cloudflare, etc:
+    - Problem with these is that they provide a random url which does not give a personalized impression
+    - They even provide a custom subdomain but this require subscription of those platforms
+    2. using a private tunneling server whose job is to map the request with particular vm:
+    - Instead of creating a server from scratch we could use a particular tunneling engine, examples are frp, etc there are multiple open source tunneling engines 
+    - we need a cloud based server and domain name
+    - Instead of creating multiple subdomains manually, we could get a wildcard record which points all the subdomains to our server, and the engine running over it maps the incoming traffic to the particular vm tunnel base on the subdomain
+    - It works for both http traffic and ssh traffic as well, just need to add proxy set in frps
+
+----------------------------------------------------------------------
+Proxmox VE :: bare Metal HyperVisor
+----------------------------------------------------------------------
+
+1. Installation Process of Proxmox VE:
+    - Configure each node, install proxmox VE ISO on each of the node
+    - Each node hosts a browser interface at port 8006, which can be accessed using the socket IP in network 
+    - Once you have installed nodes, we need to create a cluster of all these nodes so that they can be accessed and managed from a single node or single node connection
+    - From browser interface of the node, create cluster and then get the joining information from that node, then from other nodes join the cluster using that information from node 1 
+
+2. Changing the repository of Proxmox, 
+    - Proxmox provides two repositories, enterprise version and the no-subscription version
+    - The main difference is that packages are tested at higher level in enterprise version
+    - It is not suggested to go with no-subscription version for production level
+    Steps to change the version:
+    1. UI method
+    Do this on each node individually:
+    Open Proxmox Web UI.
+        Select Datacenter → your node.
+        Go to System → Repositories.
+
+        You will see something like: pve-enterprise
+
+        Select the enterprise repository.
+            Click Disable.
+
+        Then add the no-subscription repository:
+            Click Add.
+        Select No-Subscription Repository.  
+        Confirm.
+
+        You should now have something equivalent to:
+        http://download.proxmox.com/debian/pve <your-release> pve-no-subscription
+
+    2. CLI method
+
+        SSH into each node.
+
+        First check your Proxmox/Debian version:
+
+            pveversion
+            Proxmox VE 8
+
+        Enterprise repository:
+            nano /etc/apt/sources.list.d/pve-enterprise.list
+            Comment it:
+            # deb https://enterprise.proxmox.com/debian/pve bookworm pve-enterprise
+
+        Then add:
+            nano /etc/apt/sources.list
+        Add:
+            deb http://download.proxmox.com/debian/pve bookworm pve-no-subscription
+        Then:
+            apt update
+        Proxmox VE 9
+        PVE 9 uses the newer .sources format. The enterprise repository is typically:
+        /etc/apt/sources.list.d/pve-enterprise.sources
+
+        Disable/remove/comment the enterprise entry and configure the corresponding pve-no-subscription repository.
+        Then:
+        apt update
+
+        The current PVE documentation confirms that PVE 9 uses pve-enterprise.sources and that the no-subscription repository is available without a subscription.
+
+----------------------------------------------------------------
+What is KVM and QEMU ?
+----------------------------------------------------------------
+
+KVM - Kernel-based Virtual Machine
+    - KVM allows a VM's operating system to execute CPU instructions directly on the physical CPU, while keeping it isolated from the host and other VMs.
+QEMU - Quick Emulator
+    - QEMU is primarily a machine emulator and virtualizer.
+    - In a Proxmox VM, QEMU is responsible for creating the virtual hardware environment.
+
+------------------------------------------------------------
+STRUCTURE OF PROXMOX VE:
+------------------------------------------------------------
+
+1. 
+                    PROXMOX
+                       │
+                Linux Kernel
+                       │
+                      KVM
+                       │
+          ┌────────────┴────────────┐
+          │                         │
+        VM 101                    VM 102
+          │                         │
+        QEMU                       QEMU
+          │                         │
+    Virtual Hardware         Virtual Hardware
+          │                         │
+    ┌─────┼─────┐             ┌─────┼─────┐
+    │     │     │             │     │     │
+   CPU   RAM   Disk           CPU   RAM   Disk
+    │     │     │             │     │     │
+    └─────┼─────┘             └─────┼─────┘
+          │                         │
+          └──────────┬──────────────┘
+                     │
+              Physical Hardware
+
+2. 
+
+Physical Hardware
+       │
+       ↓
+Linux Kernel
+       │
+       ├── CPU scheduler
+       ├── Memory management
+       ├── Networking
+       ├── Storage
+       └── KVM
+              │
+              ↓
+            QEMU
+              │
+              ↓
+             VM
+
+
+Proxmox provides 2 things:
+1. VM's - KVM + QEMU
+2. Container - LXC
+
+Proxmox Storage:
+    1. local: Directory storage
+        This is the default storage, where you can store iso files, container templates, vm snippets, container files, etc 
+        You could even choose what kind of data you want local storage store 
+    2. local-lvm: LVM-Thin storage
+        This is also a default storage, which comes with proxmox installed
+        It normally stores VM disks, Container root disks
+    3. ZFS: Local Advanced Storage
+Shared storage:
+    1. NFS: Network File System
+    2. SMB/CIFS: Similar concept to NFS, but using the SMB protocol.
+Distributed Storage;
+    1. Ceph: Multiple nodes contribute storage to one distributed storage system.
+
+Proxmox also supports regular LVM storage.
+LVM: Logical Volume Manager
+
+Important Example: 
+    VM disk size = 100 GB
+    Actual data written = 12 GB
+    Physical storage consumed ≈ 12 GB 
+
+    This is what local thinning means........
+
+------------------------------------------------------------------
+What approach are we going to use and why ?
+------------------------------------------------------------------
+NFS: Network File System
+    - This approach is even supported by proxmox
+    - It provides access to all the nodes in the cluster 
+    - Since they are in the same network, its much easier to share data among the nodes
+    - We are using NFS storage for:
+        1. ISO files
+        2. VM templates
+        3. Container templates
+    - Steps to create NFS:
+
+               NFS Server
+              /mnt/storage
+                    │
+              NFS protocol
+                    │
+        ┌───────────┼───────────┐
+        ↓           ↓           ↓
+     Proxmox      Proxmox     Proxmox
+      Node1        Node2       Node3
+        │           │           │
+        └───────────┼───────────┘
+                    │
+             Proxmox NFS
+               Storage
+
+    - We need to install a nfs server on the system and mount the part to nfs 
+NFS itself is not a Proxmox-created storage system; NFS is a network storage protocol, and Proxmox has built-in support for connecting to an existing NFS export and using it as Proxmox storage.
+
+-------------------------------------------------------------------
+
+-------------------------------------------------------------------

@@ -1,0 +1,41 @@
+Proxmox API documentation:
+- https://pve.proxmox.com/pve-docs/api-viewer/
+Each Node on proxmox exposes a set of api endpoints, that perform a partiular that lets user to automate and provide visual layer of abstraction over various functionalities
+All the functionalities that can be performed using UI of proxmox can also be done using api calls
+
+Flow of Users request:
+        User
+          ↓
+    TFSRun interface
+          ↓
+    TFSRun backedn
+          ↓
+    Proxmox API
+          ↓
+    Proxmox Cluster
+          ↓
+    VM / Container actions
+
+These API endpoints can be used for various task like:
+1. VM management
+2. Container management
+3. Resource management
+4. Cluster information
+5. Storage management
+6. Templates and cloning
+7. Authentication
+
+TFSRun Backend Setup:
+Techstack used:
+    1. Node JS 
+    2. Express JS
+    3. Proxmox APIs
+    4. SQL DB
+In order to use Proxmox APIs the backend server needs to be either in the same network or connection via tunnels 
+
+TFSRun UI SetUp:
+Techstack used:
+    1. React
+    2. Animation elements
+
+

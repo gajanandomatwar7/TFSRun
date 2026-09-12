@@ -1,0 +1,75 @@
+Services we will be providing;
+    1. EC2 type Service
+    2. S3 type storage
+    3. DB services (particularly psql)
+
+--------------------------------------------------------
+1. EC2 type Service
+--------------------------------------------------------
+                              TFSRun
+                                │
+              ┌─────────────────┴─────────────────┐
+              │                                   │
+          Control Plane                       Data Plane
+              │                                   │
+       Your Web Application                  Proxmox Cluster
+              │                         ┌─────────┼─────────┐
+              │                         │         │         │
+       ┌──────┼──────┐                Node 1    Node 2    Node 3
+       │      │      │
+    Auth   Scheduler Database
+              │
+              ↓
+        Proxmox API
+    
+Things we will be needing for creating an instance:
+    1. Resource Availability
+    2. Proxmox API for creating VM
+    3. Template of VM
+    4. QEMU agent installed on VM, for connecting and get details of VM like its IP, etc 
+    5. All the tools required are already configured on the template 
+
+In order to be on Internet:
+1. Join the college Network
+2. ssh into the vm using the provided private IP
+3. Run the following command:
+   1. Run this on the VM : curl -fsSL https://tfsrun.cloud/setup-vm.sh | sudo bash
+   2. Run this on your machine from which you are trying to ssh :  curl -fsSL https://tfsrun.cloud/setup-ssh-client.sh | sudo bash
+   Enter the same Application name on both commands, now you are ready to host your applciation with a customized domain name 
+   example google.tfsrun.cloud
+
+
+--------------------------------------------------------
+2. S3 type storage
+--------------------------------------------------------
+
+We are using a tool called MinIO, which helps us to maintain multiple users' data on a single disc with secure data access.
+It provides two things:
+    1. Access Key
+    2. Secret Key
+We could limit this to one pair per bucket, and one user can create multiple buckets.
+
+STRUCTURE:
+                        TFSRun
+                           │
+             ┌─────────────┴─────────────┐
+             │                           │
+        Compute Storage              Object Storage(VM disk)
+             │                           │
+       Proxmox Storage                 MinIO
+             │                           │
+     ┌───────┼────────┐          ┌───────┴───────┐
+     │       │        │          │               │
+   Local    NFS      Ceph       Bucket A       Bucket B
+   LVM     ZFS etc.                │               │
+     │                             │               │
+    VM disks                   User objects    User objects
+
+Steps of implementation:
+    1. Deploy MinIO inside a VM, and use that VM as your S3-compatible object-storage service.
+    2. Now minio creates buckets on the vm, it utilizes the storage space provided to the VM
+    3. In our case we have provided a 200 GB SSD space to the VM
+
+--------------------------------------------------------
+3. DB service
+--------------------------------------------------------
