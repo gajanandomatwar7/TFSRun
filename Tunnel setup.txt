@@ -1,0 +1,342 @@
+-----------------------------------------------------------------
+TFSRun Tunneling Architecture:-
+-----------------------------------------------------------------
+
+1. What problem are we solving?
+
+TFSRun provides VMs that do not have public IP addresses. A VM may have a private address such as:
+10.x.x.x
+but users need to access services running inside that VM through a public TFSRun domain.
+
+For example:
+ssh@app1.tfsrun.cloud
+or:
+https://app1.tfsrun.cloud
+
+--------------------------------------------------------------------
+The tunneling system therefore creates a connection between:-
+
+Internet
+    ↓
+TFSRun Public Infrastructure
+    ↓
+FRP Server (frps)
+    ↓
+FRP Client (frpc)
+    ↓
+Private VM
+    ↓
+Application / SSH
+
+The VM does not need an inbound public connection.
+--------------------------------------------------------------------
+
+2. High-Level Architecture
+                         INTERNET
+                            │
+              ┌─────────────┴─────────────┐
+              │                           │
+        HTTP / HTTPS                     SSH
+              │                           │
+              ▼                           ▼
+      app1.tfsrun.cloud           ssh@app1.tfsrun.cloud
+              │                           │
+              └─────────────┬─────────────┘
+                            │
+                            ▼
+                  ┌───────────────────┐
+                  │  TFSRun Public    │
+                  │     Server        │
+                  │                   │
+                  │      frps         │
+                  └─────────┬─────────┘
+                            │
+                    FRP Tunnel
+                  (outbound connection)
+                            │
+                            ▼
+                  ┌───────────────────┐
+                  │   Private VM      │
+                  │                   │
+                  │      frpc         │
+                  │                   │
+                  │  ┌─────────────┐  │
+                  │  │ SSH : 22    │  │
+                  │  │ HTTP : 80   │  │
+                  │  │ HTTPS :443  │  │
+                  │  └─────────────┘  │
+                  └───────────────────┘
+
+The key architectural concept is:
+    The FRP client establishes an outbound persistent tunnel from the private VM to the public FRP server. 
+    Incoming user traffic is then routed through this already-established tunnel back to the VM.
+
+3. Main Components:
+Your tunneling architecture has two fundamental FRP components.
+
+A. FRP Server — frps
+Runs on the public TFSRun server.
+Public TFSRun Server
+        │
+        └── frps
+
+Responsibilities:
+    -Accept connections from FRP clients
+    -Maintain registered tunnels
+    -Identify which tunnel belongs to which service
+    -Receive public traffic
+    -Forward that traffic through the appropriate tunnel
+    -Send traffic to the corresponding FRP client
+
+It acts as the central tunneling endpoint.
+
+
+B. FRP Client — frpc
+Runs inside each private VM.
+Private VM
+    │
+    └── frpc
+
+Responsibilities:
+    -Connect outward to frps
+    -Maintain the tunnel
+    -Register the VM's services
+    -Forward traffic received through the tunnel to local services
+
+For example:
+frpc
+ │
+ ├── SSH → 127.0.0.1:22
+ │
+ ├── HTTP → 127.0.0.1:80
+ │
+ └── HTTPS → 127.0.0.1:443
+
+------------------------------------------------------------------
+4. Why the Connection Works Without a Public IP
+
+This is probably the most important concept to explain in your documentation.
+Suppose the VM has:
+    VM IP = 10.13.3.90
+
+This is private.
+The VM starts:
+frpc
+
+    -frpc connects outbound to:
+
+TFSRun Public Server
+        ↓
+      frps
+
+So the connection is:
+
+VM ───────────────► frps
+      outbound
+
+The VM doesn't need to accept an incoming connection from the Internet.
+
+Once the tunnel exists:
+
+User
+ │
+ │ HTTPS / SSH
+ ▼
+frps
+ │
+ │ existing FRP tunnel
+ ▼
+frpc
+ │
+ ▼
+VM service
+
+This is the fundamental mechanism behind the TFSRun networking model.
+
+
+5. Control Connection vs Application Traffic
+
+This distinction is useful in your documentation.
+
+There are effectively two logical directions.
+
+Tunnel establishment
+VM
+ │
+ │ outbound connection
+ ▼
+FRP Server
+
+This establishes and maintains the tunnel.
+
+User traffic
+User
+ │
+ ▼
+FRP Server
+ │
+ ▼
+Existing FRP Tunnel
+ │
+ ▼
+VM
+
+So the user doesn't directly connect to the private VM.
+
+6. HTTP Traffic Flow
+
+Suppose a VM is running:
+
+Node.js
+localhost:3000
+
+and TFSRun exposes it as:
+
+app1.tfsrun.cloud
+
+The conceptual flow becomes:
+
+Browser
+   │
+   │ HTTPS
+   ▼
+app1.tfsrun.cloud
+   │
+   ▼
+TFSRun Public Server
+   │
+   ▼
+frps
+   │
+   │ FRP tunnel
+   ▼
+frpc
+   │
+   ▼
+localhost:3000
+   │
+   ▼
+Node.js Application
+
+The important point is:
+
+The application remains private. Only the required traffic is exposed through the tunnel.
+
+7. SSH Traffic Flow
+
+For SSH:
+
+User
+ │
+ │ ssh
+ ▼
+ssh@app1.tfsrun.cloud
+ │
+ ▼
+frps
+ │
+ │ FRP tunnel
+ ▼
+frpc
+ │
+ ▼
+VM:22
+ │
+ ▼
+sshd
+
+So the same VM can have both:
+
+HTTP/HTTPS
+     +
+SSH
+
+using the same underlying tunneling architecture.
+
+8. TFSRun's Logical Architecture
+
+For documentation, I'd show the overall system as four layers:
+
+┌───────────────────────────────────────────────┐
+│                 USER LAYER                    │
+│                                               │
+│ Browser              SSH Client               │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│              TFSRun PUBLIC LAYER              │
+│                                               │
+│ DNS / Domains                                 │
+│ FRP Server (frps)                             │
+│ Public Traffic Entry                          │
+└───────────────────────┬───────────────────────┘
+                        │
+                   FRP Tunnel
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│                VM CLIENT LAYER                │
+│                                               │
+│ FRP Client (frpc)                             │
+│ VM Networking                                 │
+│ SSH / HTTP / HTTPS / Application Ports        │
+└───────────────────────┬───────────────────────┘
+                        │
+                        ▼
+┌───────────────────────────────────────────────┐
+│              APPLICATION LAYER                │
+│                                               │
+│ Node.js / Django / Nginx / SSH / etc.         │
+└───────────────────────────────────────────────┘
+9. Where Your setup-vm.sh Fits
+
+Your automation script is essentially responsible for turning a newly-created VM into a TFSRun-connected VM.
+
+Conceptually:
+
+New VM
+  │
+  ▼
+setup-vm.sh
+  │
+  ├── Install/configure FRP client
+  │
+  ├── Configure VM identity
+  │
+  ├── Configure tunnel
+  │
+  ├── Configure exposed services
+  │
+  └── Start/enable frpc
+          │
+          ▼
+       frps
+          │
+          ▼
+   TFSRun network
+
+So rather than manually configuring every VM, TFSRun automates the client-side setup.
+
+10. VM-to-TFSRun Relationship
+
+For multiple VMs:
+
+                         TFSRun
+                    ┌─────────────┐
+                    │    frps     │
+                    └──────┬──────┘
+                           │
+             ┌─────────────┼─────────────┐
+             │             │             │
+          Tunnel        Tunnel        Tunnel
+             │             │             │
+             ▼             ▼             ▼
+          VM-01          VM-02          VM-03
+          frpc            frpc           frpc
+             │             │             │
+          App/SSH       App/SSH       App/SSH
+
+Each VM establishes its own FRP client connection.
+
+This allows the public infrastructure to act as the central tunnel aggregation point.
